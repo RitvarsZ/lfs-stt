@@ -5,9 +5,8 @@ edition = "2024"
 
 [dependencies]
 whisper-rs = { version = "0.15.1", features = ["cuda"] }
-cpal = "0.15"
-crossterm = "0.27"
-anyhow = "1.0"
+cpal = "0.17.1"
+crossterm = "0.29.0"
 rubato = "1.0.1"
 audioadapter-buffers = "2.0.0"
 hound = "3.5.1"

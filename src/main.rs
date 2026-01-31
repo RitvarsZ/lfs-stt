@@ -1,95 +1,36 @@
-use anyhow::Result;
 use audioadapter_buffers::direct::InterleavedSlice;
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use crossterm::event::{self, Event, KeyCode, KeyEventKind};
 use rubato::{Fft, Resampler};
-use std::sync::{Arc, Mutex, mpsc};
-use std::thread;
 use std::time::Duration;
-use whisper_rs::{FullParams, SamplingStrategy, WhisperContext, WhisperContextParameters, convert_stereo_to_mono_audio};
+use whisper_rs::{convert_stereo_to_mono_audio};
 
-fn dump_buffer_to_wav(samples: &[f32]) -> Result<()> {
-    let spec = hound::WavSpec {
-        channels: 1,
-        sample_rate: 16_000,
-        bits_per_sample: 32,
-        sample_format: hound::SampleFormat::Float,
-    };
-    let mut writer = hound::WavWriter::create("debug.wav", spec)?;
-    for &sample in samples {
-        writer.write_sample(sample)?;
-    }
-    writer.finalize()?;
-    Ok(())
-}
+use crate::stt::maybe_dump_buffer_to_wav;
+mod stt;
 
-fn main() -> Result<()> {
+pub const DEBUG_AUDIO_RESAMPLING: bool = false;
+pub const USE_GPU: bool = true;
+pub const MODEL_PATH: &str = "models/medium.en.bin";
+
+fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("🎮 Press SPACE to toggle recording. Press ESC to quit.");
 
     // -----------------------------
-    // 1️⃣ Setup Whisper
+    // 1 Setup speech-to-text
     // -----------------------------
-    let mut params = WhisperContextParameters::new();
-    params.use_gpu(true); // tiny/small models are fast on CPU
-    params.gpu_device(0);
-    let ctx = Arc::new(WhisperContext::new_with_params("models/medium.en.bin", params)?);
+    let stt_ctx = stt::SttContext::init_stt();
 
     // -----------------------------
-    // 2️⃣ Shared audio buffer and recording flag
-    // -----------------------------
-    let audio_data = Arc::new(Mutex::new(Vec::<f32>::new()));
-    let recording = Arc::new(Mutex::new(false));
-
-    // -----------------------------
-    // 3️⃣ Channels
-    // -----------------------------
-    let (audio_tx, audio_rx) = mpsc::channel::<Vec<f32>>(); // audio buffers to STT thread
-    let (log_tx, log_rx) = mpsc::channel::<String>(); // logs + transcription to main thread
-
-    // STT thread
-    let ctx_clone = ctx.clone();
-    thread::spawn(move || {
-        let mut state = ctx_clone.create_state().unwrap();
-        log_tx.send("✅ STT thread started".into()).unwrap();
-
-        let mut full_params = FullParams::new(SamplingStrategy::Greedy { best_of: 8 });
-        full_params.set_language(Some("en"));
-        full_params.set_print_special(false);
-        full_params.set_print_progress(false);
-        full_params.set_print_realtime(false);
-        full_params.set_print_timestamps(false);
-
-        while let Ok(samples) = audio_rx.recv() {
-            log_tx.send(format!("📦 Received {} samples for transcription", samples.len())).unwrap();
-
-            if let Err(err) = state.full(full_params.clone(), &samples) {
-                log_tx.send(format!("❌ Transcription error: {:?}", err)).unwrap();
-                continue;
-            }
-
-            let mut text = String::new();
-            let n_segments = state.full_n_segments();
-            for i in 0..n_segments {
-                if let Some(segment) = state.get_segment(i) && let Ok(segment) = segment.to_str() {
-                    text.push_str(segment);
-                }
-            }
-
-            log_tx.send(format!("📝 Transcribed text: {}", text.trim())).unwrap();
-        }
-    });
-
-    // -----------------------------
-    // 4️⃣ Setup audio capture
+    // 2 Setup audio capture
     // -----------------------------
     let host = cpal::default_host();
     let device = host.default_input_device().expect("No input device");
     let input_config = device.default_input_config()?;
     let input_channels = input_config.channels() as usize;
-    let sample_rate = input_config.sample_rate().0 as usize;
+    let sample_rate = input_config.sample_rate() as usize;
 
-    let audio_data_clone = audio_data.clone();
-    let recording_clone = recording.clone();
+    let audio_data_clone = stt_ctx.audio_data.clone();
+    let recording_clone = stt_ctx.recording.clone();
 
     let stream = device.build_input_stream(
         &input_config.into(),
@@ -105,20 +46,28 @@ fn main() -> Result<()> {
     stream.play()?;
 
     // -----------------------------
-    // 5️⃣ Resampler setup (16kHz target)
+    // 3 Resampler setup (16kHz target)
     // -----------------------------
     let mut resampler = Fft::<f32>::new(sample_rate, 16_000, 1024, 2, 1, rubato::FixedSync::Both)?;
 
     // -----------------------------
-    // 6️⃣ Push-to-talk toggle loop
+    // 4 Push-to-talk toggle loop
     // -----------------------------
     let mut is_recording = false;
 
     loop {
+        // -----------------------------
+        // 5 Read logs from STT thread
+        // -----------------------------
+        while let Ok(msg) = stt_ctx.log_rx.try_recv() {
+            println!("{}", msg);
+        }
+
         // Poll keys
         if !event::poll(Duration::from_millis(20))? {
             continue;
         }
+
 
         if let Event::Key(key) = event::read()? && key.kind == KeyEventKind::Press {
             match key.code {
@@ -129,13 +78,13 @@ fn main() -> Result<()> {
                 KeyCode::Char(' ') => {
                     if !is_recording {
                         println!("🎤 Recording...");
-                        audio_data.lock().unwrap().clear();
-                        *recording.lock().unwrap() = true;
+                        stt_ctx.audio_data.lock().unwrap().clear();
+                        *stt_ctx.recording.lock().unwrap() = true;
                         is_recording = true;
                     } else {
                         println!("Converting input to 16k mono");
-                        *recording.lock().unwrap() = false;
-                        let raw_samples = audio_data.lock().unwrap().clone();
+                        *stt_ctx.recording.lock().unwrap() = false;
+                        let raw_samples = stt_ctx.audio_data.lock().unwrap().clone();
                         let mono = convert_stereo_to_mono_audio(&raw_samples).expect("should be no half samples missing");
 
                         let nbr_input_frames = mono.len();
@@ -171,21 +120,15 @@ fn main() -> Result<()> {
                             input_frames_next = resampler.input_frames_next();
                         }
 
-                        // dump_buffer_to_wav(&outdata)?;
+                        maybe_dump_buffer_to_wav(&outdata)?;
+
                         println!("🛑 Sending for transcription...");
-                        audio_tx.send(outdata).unwrap();
+                        stt_ctx.audio_tx.send(outdata).unwrap();
                         is_recording = false;
                     }
                 }
                 _ => {}
             }
-        }
-
-        // -----------------------------
-        // 7️⃣ Read logs from STT thread
-        // -----------------------------
-        while let Ok(msg) = log_rx.try_recv() {
-            println!("{}", msg);
         }
     }
 
