@@ -20,7 +20,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let (resampled_sender, resampled_receiver) = mpsc::channel::<Vec<f32>>();
 
     let mut audio_capture = AudioStreamContext::init_audio_capture(audio_sender)?;
-    let dbg = resampler::init_resampler(
+    resampler::init_resampler(
         audio_receiver,
         resampled_sender,
         audio_capture.sample_rate,
@@ -34,9 +34,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     loop {
         while let Ok(msg) = stt_ctx.log_rx.try_recv() {
             println!("{}", msg);
-        }
-        while let Ok(msg) = dbg.try_recv() {
-            println!("debug: {}", msg);
         }
 
         // Poll keys

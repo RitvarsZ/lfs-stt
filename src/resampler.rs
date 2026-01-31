@@ -11,8 +11,7 @@ pub fn init_resampler(
     audio_out: Sender<Vec<f32>>,
     sample_rate: usize,
     input_channels: usize,
-) -> Receiver<String> {
-    let (tx, rx) = std::sync::mpsc::channel::<String>();
+) {
     let mut input_accum: Vec<f32> = Vec::new();
 
     std::thread::spawn(move || {
@@ -35,8 +34,6 @@ pub fn init_resampler(
             FixedAsync::Input,
         )
         .expect("Failed to create async resampler");
-
-        tx.send(format!("Resampler ratio {} channels {}", ratio, input_channels)).unwrap();
 
         while let Ok(samples) = audio_in.recv() {
             let mono = match input_channels {
@@ -68,7 +65,5 @@ pub fn init_resampler(
             audio_out.send(out).unwrap();
         }
     });
-
-    rx
 }
 
