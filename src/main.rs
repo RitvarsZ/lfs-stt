@@ -14,6 +14,7 @@ pub const MODEL_PATH: &str = "models/small.en.bin";
 pub const INSIM_HOST: &str = "127.0.0.1";
 pub const INSIM_PORT: &str = "29999";
 pub const MESSAGE_PREVIEW_TIMEOUT_SECS: u64 = 20;
+pub const RECORDING_TIMEOUT_SECS: u8 = 10;
 pub const MAX_MESSAGE_LEN: usize = 95;
 
 #[tokio::main]
@@ -74,6 +75,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         message_timeout = None;
                         println!("Error setting message preview timeout");
                     }
+                },
+                stt::SttThreadMessageType::RecordingTimeoutReached => {
+                    println!("{}", msg);
+                    ui_state = UiState::Processing;
+                    ui_update_queue.push(UiEvent::UpdateState(ui_state));
+                    audio_capture.pause_stream()?;
+                    *stt_ctx.is_recording.lock().unwrap() = false;
                 }
             };
         }

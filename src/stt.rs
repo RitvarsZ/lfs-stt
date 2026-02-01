@@ -1,7 +1,7 @@
 use std::{fmt::Display, sync::{Arc, Mutex, mpsc::{self, Receiver}}, thread::{self}};
 use whisper_rs::{FullParams, SamplingStrategy, WhisperContext, WhisperContextParameters};
 
-use crate::DEBUG_AUDIO_RESAMPLING;
+use crate::{DEBUG_AUDIO_RESAMPLING, RECORDING_TIMEOUT_SECS};
 use crate::USE_GPU;
 use crate::MODEL_PATH;
 
@@ -9,6 +9,7 @@ pub enum SttThreadMessageType {
     Log,
     TranscriptionError,
     TranscriptionResult,
+    RecordingTimeoutReached,
 }
 
 pub struct SttThreadMessage {
@@ -22,6 +23,7 @@ impl Display for SttThreadMessage {
             SttThreadMessageType::Log => write!(f, "[STT LOG] {}", self.content),
             SttThreadMessageType::TranscriptionError => write!(f, "[STT ERROR] {}", self.content),
             SttThreadMessageType::TranscriptionResult => write!(f, "[STT TRANSCRIPTION] {}", self.content),
+            SttThreadMessageType::RecordingTimeoutReached => write!(f, "[STT TIMEOUT REACHED] {}", self.content),
         }
     }
 }
@@ -81,18 +83,26 @@ pub fn start_stt_worker(
 
 
         loop {
-            let is_recording = {
-                let rec_lock = is_recording.lock().unwrap();
-                *rec_lock
-            };
-
             // While recording, dump samples into buffer.
-            if is_recording {
+            if *is_recording.lock().unwrap() {
                 while let Ok(samples) = audio_in.try_recv() {
                     audio_buffer.extend_from_slice(&samples);
                 }
 
-                continue;
+                // if audio goes over configured timeout seconds, stop recording and process.
+                // this is in place in case we start recording and forget
+                // or recording was started accidentally.
+                if audio_buffer.len() >= 16_000 * RECORDING_TIMEOUT_SECS as usize {
+                    *is_recording.lock().unwrap() = false;
+                    let _ = log_tx.send(
+                        SttThreadMessage::new(
+                            SttThreadMessageType::RecordingTimeoutReached,
+                            String::from(""),
+                        )
+                    );
+                } else {
+                    continue;
+                }
             }
 
             // When not recording and have samples, transcribe and clear the buffer.
