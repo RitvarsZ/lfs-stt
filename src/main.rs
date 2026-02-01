@@ -13,9 +13,8 @@ pub const USE_GPU: bool = true;
 pub const MODEL_PATH: &str = "models/small.en.bin";
 pub const INSIM_HOST: &str = "127.0.0.1";
 pub const INSIM_PORT: &str = "29999";
-pub const MESSAGE_PREVIEW_TOP: u8 = 150; // from 0 to 200
 pub const MESSAGE_PREVIEW_TIMEOUT_SECS: u64 = 20;
-const MAX_MESSAGE_LEN: usize = 95;
+pub const MAX_MESSAGE_LEN: usize = 95;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut conn = insim::tcp(format!("{}:{}", INSIM_HOST, INSIM_PORT)).connect_blocking()?;
@@ -67,7 +66,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 stt::SttThreadMessageType::TranscriptionResult => {
                     println!("{}", msg);
                     message = msg.content;
-                    message.truncate(MAX_MESSAGE_LEN);
                     ui_state = UiState::Idle;
                     ui_update_queue.push(UiEvent::UpdateState(ui_state));
                     ui_update_queue.push(UiEvent::UpdatePreview(message.clone()));
@@ -109,11 +107,22 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
                     match ui_state {
                         UiState::Idle => {
-                            let msg = insim::insim::Msx{
-                                reqi: insim::identifiers::RequestId::from(1),
-                                msg: message.clone(),
-                            };
-                            conn.write(insim::Packet::Msx(msg))?;
+                            // Split message into chunks of MAX_MESSAGE_LEN and send each chunk as a separate Msx packet.
+                            let mut messages: Vec<String> = message.chars()
+                                .collect::<Vec<_>>()
+                                .chunks(MAX_MESSAGE_LEN)
+                                .map(|chunk| chunk.iter().collect())
+                                .rev()
+                                .collect();
+
+                            while let Some(part) = messages.pop() {
+                                let msg = insim::insim::Msx{
+                                    reqi: insim::identifiers::RequestId::from(1),
+                                    msg: part.to_string(),
+                                };
+                                conn.write(insim::Packet::Msx(msg))?;
+                            }
+
                             ui_update_queue.push(UiEvent::ClearPreview);
                             message.clear();
                             message_timeout = None;
