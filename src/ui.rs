@@ -1,44 +1,96 @@
-use crate::{MESSAGE_PREVIEW_BTN_ID, MESSAGE_PREVIEW_TOP};
+use crate::{MESSAGE_PREVIEW_TOP};
 
-pub fn get_message_preview(message: String) -> insim::insim::Btn {
+#[derive(Debug, Clone, Copy)]
+pub enum UiState {
+    Idle,
+    Recording,
+    Processing,
+}
+
+#[derive(Debug)]
+pub enum UiEvent {
+    UpdatePreview(String),
+    ClearPreview,
+    UpdateState(UiState),
+}
+
+pub const STATE_ID: u8 = 1;
+pub const PREVIEW_ID: u8 = 2;
+
+pub const UI_SCALE: u8 = 4;
+
+pub const STATE_OFFSET_L: u8 = 4;
+pub const PREVIEW_OFFSET_L: u8 = STATE_OFFSET_L + UI_SCALE;
+
+pub fn dispatch_ui_events(
+    conn: &mut insim::net::blocking_impl::Framed,
+    events: &mut Vec<UiEvent>,
+) {
+    while let Some(event) = events.pop() {
+        match event {
+            UiEvent::UpdatePreview(message) => {
+                let _ = conn.write(insim::Packet::Btn(get_message_preview_btn(message)));
+            },
+            UiEvent::ClearPreview => {
+                let _ = conn.write(insim::Packet::Btn(get_message_preview_btn(String::from(""))));
+            },
+            UiEvent::UpdateState(state) => {
+                let _ = conn.write(insim::Packet::Btn(get_state_btn(state)));
+            },
+        };
+    }
+}
+
+fn get_state_btn(state: UiState) -> insim::insim::Btn {
+    let text = match state {
+        UiState::Idle => "^2•",
+        UiState::Recording => "^1•",
+        UiState::Processing => "^3•",
+    };
+
     insim::insim::Btn{
         t: MESSAGE_PREVIEW_TOP,
-        w: message.len() as u8,
-        h: 4,
-        l: 100 - (message.len() / 2) as u8,
+        w: UI_SCALE,
+        h: UI_SCALE,
+        l: STATE_OFFSET_L,
         reqi: insim::identifiers::RequestId::from(1),
         ucid: insim::identifiers::ConnectionId::LOCAL,
-        clickid: insim::identifiers::ClickId::from(MESSAGE_PREVIEW_BTN_ID),
+        clickid: insim::identifiers::ClickId::from(STATE_ID),
         inst: insim::insim::BtnInst::default(),
         bstyle: insim::insim::BtnStyle{
-            colour: insim::insim::BtnStyleColour::Ok,
-            flags: insim::insim::BtnStyleFlags::default(),
+            colour: insim::insim::BtnStyleColour::NotEditable,
+            flags: insim::insim::BtnStyleFlags::LIGHT,
+        },
+        typein: None,
+        caption: None,
+        text: text.to_string(),
+    }
+}
+
+// depending on charaters used, width may vary
+fn msg_to_btn_width(message: String) -> u8 {
+    let len = message.len();
+    let width = (len as f32 * 0.75).ceil() as u8;
+    width.clamp(5, 200)
+}
+
+fn get_message_preview_btn(message: String) -> insim::insim::Btn {
+    insim::insim::Btn{
+        t: MESSAGE_PREVIEW_TOP,
+        w: msg_to_btn_width(message.clone()),
+        h: UI_SCALE,
+        l: PREVIEW_OFFSET_L,
+        reqi: insim::identifiers::RequestId::from(1),
+        ucid: insim::identifiers::ConnectionId::LOCAL,
+        clickid: insim::identifiers::ClickId::from(PREVIEW_ID),
+        inst: insim::insim::BtnInst::default(),
+        bstyle: insim::insim::BtnStyle{
+            colour: insim::insim::BtnStyleColour::NotEditable,
+            flags: insim::insim::BtnStyleFlags::LIGHT | insim::insim::BtnStyleFlags::LEFT,
         },
         typein: None,
         caption: None,
         text: format!("^3{}", message),
-    }
-}
-
-pub fn get_button_clear_function() -> insim::insim::Bfn {
-    insim::insim::Bfn {
-        reqi: insim::identifiers::RequestId::from(1),
-        subt: insim::insim::BfnType::Clear,
-        ucid: insim::identifiers::ConnectionId::LOCAL,
-        clickid: insim::identifiers::ClickId::from(MESSAGE_PREVIEW_BTN_ID),
-        clickmax: MESSAGE_PREVIEW_BTN_ID,
-        inst: insim::insim::BtnInst::default(),
-    }
-}
-
-pub fn clear_message_preview(conn: &mut insim::net::blocking_impl::Framed) {
-    match conn.write(insim::Packet::Bfn(get_button_clear_function())) {
-        Ok(_) => {
-            println!("Message preview cleared");
-        },
-        Err(e) => {
-            println!("Error clearing message preview: {:?}", e);
-        }
     }
 }
 

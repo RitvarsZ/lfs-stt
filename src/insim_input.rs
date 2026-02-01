@@ -36,8 +36,7 @@ pub fn init_message_reader(
                     }
                 },
                 Err(e) => {
-                    println!("Error reading from Insim connection: {:?}", e);
-                    break;
+                    panic!("{}", e);
                 },
             }
         }
