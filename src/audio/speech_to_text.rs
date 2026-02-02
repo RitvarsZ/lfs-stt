@@ -59,7 +59,7 @@ pub async fn init(
 
 
         loop {
-            while let Ok(audio_buffer) = audio_in.try_recv() {
+            while let Some(audio_buffer) = audio_in.recv().await {
                 event_tx.send(
                     SttMessage::new(
                         SttMessageType::Log,

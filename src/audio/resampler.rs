@@ -37,7 +37,7 @@ pub async fn init(
         .expect("Failed to create async resampler");
 
         loop {
-            while let Ok(samples) = audio_rx.try_recv() {
+            while let Some(samples) = audio_rx.recv().await {
                 let mono = match input_channels {
                     1 => samples,
                     2 => convert_stereo_to_mono_audio(&samples).expect("should be no half samples missing"),

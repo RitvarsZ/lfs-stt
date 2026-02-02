@@ -74,27 +74,27 @@ async fn init_audio_capture(
         let mut buffer = Vec::<f32>::with_capacity(16_000 * RECORDING_TIMEOUT_SECS as usize);
 
         loop {
-            // this kinda sucks.
-            let rec = *is_recording.lock().await;
-
-            while let Ok(data) = rx.try_recv() {
-                // Append data to buffer
-                buffer.extend_from_slice(&data);
-                // If buffer length exceeds timeout, stop recording and send to STT
-                if buffer.len() >= 16_000 * RECORDING_TIMEOUT_SECS as usize {
-                    // Send buffer to STT
-                    tx.send(buffer.clone()).await.unwrap();
-                    // Clear buffer
-                    buffer.clear();
-                    // Stop recording
-                    *is_recording.lock().await = false;
-                }
-            }
-
-            if !rec && !buffer.is_empty() {
-                tx.send(buffer.clone()).await.unwrap();
-                buffer.clear();
-            }
+            // todo: this is dumb?
+            // todo2: this guy probably dies after exceeding buffer once. (or mutex deadlock?)
+            match *is_recording.lock().await {
+                true => {
+                    while let Ok(data) = rx.try_recv() {
+                        buffer.extend_from_slice(&data);
+                        // If buffer length exceeds timeout, stop recording and send to STT
+                        if buffer.len() >= 16_000 * RECORDING_TIMEOUT_SECS as usize {
+                            tx.send(buffer.clone()).await.unwrap();
+                            buffer.clear();
+                            *is_recording.lock().await = false;
+                        }
+                    }
+                },
+                false => {
+                    if !buffer.is_empty() {
+                        tx.send(buffer.clone()).await.unwrap();
+                        buffer.clear();
+                    }
+                },
+            };
         }
     });
 

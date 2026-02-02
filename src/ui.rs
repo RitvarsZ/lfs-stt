@@ -1,3 +1,5 @@
+use insim::builder::InsimTask;
+
 #[derive(Debug, Clone, Copy)]
 pub enum UiState {
     Idle,
@@ -24,22 +26,22 @@ pub const PREVIEW_OFFSET_LEFT: u8 = STATE_OFFSET_LEFT + UI_SCALE;
 pub const PREVIEW_OFFEST_TOP: u8 = 170; // from 0 to 200
 
 pub async fn dispatch_ui_events(
-    tx: tokio::sync::mpsc::Sender<insim::Packet>,
+    insim: InsimTask,
     events: &mut Vec<UiEvent>,
 ) {
     while let Some(event) = events.pop() {
         match event {
             UiEvent::UpdatePreview(message) => {
-                let _ = tx.send(insim::Packet::Btn(get_message_preview_btn(message))).await;
+                insim.send(insim::Packet::Btn(get_message_preview_btn(message))).await;
             },
             UiEvent::ClearPreview => {
-                let _ = tx.send(insim::Packet::Btn(get_message_preview_btn(String::from("")))).await;
+                insim.send(insim::Packet::Btn(get_message_preview_btn(String::from("")))).await;
             },
             UiEvent::UpdateState(state) => {
-                let _ = tx.send(insim::Packet::Btn(get_state_btn(state))).await;
+                insim.send(insim::Packet::Btn(get_state_btn(state))).await;
             },
             UiEvent::RemoveAllBtns => {
-                let _ = tx.send(insim::Packet::Bfn(insim::insim::Bfn{
+                insim.send(insim::Packet::Bfn(insim::insim::Bfn{
                     subt: insim::insim::BfnType::Clear,
                     reqi: insim::identifiers::RequestId::from(1),
                     clickid: insim::identifiers::ClickId::from(0),

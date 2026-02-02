@@ -1,4 +1,4 @@
-use crate::{insim_io::InsimEvent, ui::{UiEvent, UiState, dispatch_ui_events}};
+use crate::{audio::speech_to_text::SttMessageType, insim_io::InsimEvent, ui::{UiEvent, UiState, dispatch_ui_events}};
 
 mod insim_io;
 mod ui;
@@ -16,10 +16,7 @@ pub const MAX_MESSAGE_LEN: usize = 95;
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let (audio_pipeline, mut stt_rx) = audio::audio_pipeline::AudioPipeline::new().await?;
-    let (insim_event_tx, mut insim_event_rx) = tokio::sync::mpsc::channel::<InsimEvent>(1);
-    let (insim_cmd_tx, insim_cmd_rx) = tokio::sync::mpsc::channel::<insim::Packet>(1);
-
-    insim_io::init_message_io(insim_event_tx, insim_cmd_rx);
+    let (insim, mut insim_rx, _) = insim_io::init_insim().await?;
     let mut ui_state: UiState = UiState::Stopped;
     let mut message = String::from("");
     let mut message_timeout: Option<std::time::Instant> = None;
@@ -28,8 +25,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     loop {
         if !ui_update_queue.is_empty() {
             println!("Dispatching {} UI events", ui_update_queue.len());
-            dispatch_ui_events(insim_cmd_tx.clone(), &mut ui_update_queue).await;
+            dispatch_ui_events(insim.clone(), &mut ui_update_queue).await;
         }
+
         // Check for message preview timeout and clear message if reached.
         if let Some(timeout) = message_timeout && std::time::Instant::now() >= timeout{
             ui_update_queue.push(UiEvent::ClearPreview);
@@ -37,14 +35,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             message_timeout = None;
         }
 
+        // todo: use tokio::select! instead of try_recv?
         // Check if there are any messages from the STT thread.
         if let Ok(msg) = stt_rx.try_recv() {
             match msg.msg_type {
-                audio::speech_to_text::SttMessageType::Log |
-                audio::speech_to_text::SttMessageType::TranscriptionError => {
+                SttMessageType::Log |
+                SttMessageType::TranscriptionError => {
                     println!("{}", msg);
                 },
-                audio::speech_to_text::SttMessageType::TranscriptionResult => {
+                SttMessageType::TranscriptionResult => {
                     println!("{}", msg);
                     message = msg.content;
                     ui_state = UiState::Idle;
@@ -62,7 +61,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
 
         // Check received insim events.
-        if let Ok(cmd) = insim_event_rx.try_recv() {
+        if let Ok(cmd) = insim_rx.try_recv() {
             match cmd {
                 InsimEvent::IsInGame(is_in_game) => {
                     if is_in_game {
@@ -124,7 +123,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                                     reqi: insim::identifiers::RequestId::from(1),
                                     msg: part.to_string(),
                                 };
-                                let _ = insim_cmd_tx.send(insim::Packet::Msx(msg)).await;
+                                let _ = insim.send(insim::Packet::Msx(msg)).await;
                             }
 
                             ui_update_queue.push(UiEvent::ClearPreview);
