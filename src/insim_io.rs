@@ -17,6 +17,8 @@ impl InsimEvent {
         match cmd.as_str() {
             "stt talk" => Some(InsimEvent::ToggleRecording),
             "stt accept" => Some(InsimEvent::AcceptMessage),
+            "stt nc" => Some(InsimEvent::NextChannel),
+            "stt pc" => Some(InsimEvent::PeviousChannel),
             _ => None,
         }
     }

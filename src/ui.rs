@@ -5,6 +5,22 @@ use tokio::time::Sleep;
 
 use crate::{MAX_MESSAGE_LEN, MESSAGE_PREVIEW_TIMEOUT_SECS, audio::{audio_pipeline::{AudioPipeline}, speech_to_text::{SttMessage, SttMessageType}}, insim_io::InsimEvent};
 
+const STATE_ID: u8 = 1;
+const PREVIEW_ID: u8 = 2;
+const CHANNEL_ID: u8 = 3;
+const UI_SCALE: u8 = 5;
+pub const UI_OFFSET_TOP: u8 = 170;
+pub const UI_OFFSET_LEFT: u8 = 10;
+
+
+type ChatChannelUi = &'static str;
+type ChatChannelMsg = &'static str;
+type ChatChannel = (ChatChannelUi, ChatChannelMsg);
+const CHAT_CHANNELS: [ChatChannel; 2] = [
+    ("/say", ""),
+    ("^5!local", "!l"),
+];
+
 #[derive(Debug, Clone, Copy)]
 pub enum UiState {
     Idle,
@@ -16,25 +32,18 @@ pub enum UiState {
 #[derive(Debug)]
 pub enum UiEvent {
     UpdatePreview(String),
-    ClearPreview,
     UpdateState(UiState),
+    UpdateChannel(ChatChannel),
+    ClearPreview,
     RemoveAllBtns,
 }
-
-pub const STATE_ID: u8 = 1;
-pub const PREVIEW_ID: u8 = 2;
-
-pub const UI_SCALE: u8 = 5;
-
-pub const STATE_OFFSET_LEFT: u8 = 10;
-pub const PREVIEW_OFFSET_LEFT: u8 = STATE_OFFSET_LEFT + UI_SCALE;
-pub const PREVIEW_OFFEST_TOP: u8 = 170; // from 0 to 200
 
 pub struct UiContext {
     message_timeout: Option<Pin<Box<Sleep>>>,
     state: UiState,
     message: String,
     update_queue: Vec<UiEvent>,
+    chat_channel: ChatChannel,
 }
 
 impl Default for UiContext {
@@ -44,6 +53,7 @@ impl Default for UiContext {
             message: String::from(""),
             message_timeout: None,
             update_queue: vec![],
+            chat_channel: CHAT_CHANNELS[0],
         }
     }
 }
@@ -92,6 +102,9 @@ impl UiContext {
                         inst: insim::insim::BtnInst::default(),
                     })).await;
                 },
+                UiEvent::UpdateChannel(channel) => {
+                    let _ = insim.send(insim::Packet::Btn(get_channel_btn(channel))).await;
+                }
             };
         }
     }
@@ -123,8 +136,11 @@ impl UiContext {
                         UiState::Stopped => {
                             println!("Detected in-game state, starting STT.");
                             self.state = UiState::Idle;
-                            self.update_queue.push(UiEvent::UpdatePreview(self.message.clone()));
+                            if !self.message.is_empty() {
+                                self.update_queue.push(UiEvent::UpdatePreview(self.message.clone()));
+                            }
                             self.update_queue.push(UiEvent::UpdateState(self.state));
+                            self.update_queue.push(UiEvent::UpdateChannel(self.chat_channel));
                         },
                         _ => { /* No state change */ }
                     };
@@ -164,8 +180,12 @@ impl UiContext {
                     // Split message into chunks of MAX_MESSAGE_LEN and send each chunk as a separate Msx packet.
                     let mut messages: Vec<String> = self.message.chars()
                         .collect::<Vec<_>>()
-                        .chunks(MAX_MESSAGE_LEN)
-                        .map(|chunk| chunk.iter().collect())
+                        .chunks(MAX_MESSAGE_LEN - self.chat_channel.1.len())
+                        .map(|chunk| {
+                            let mut msg = format!("{} ", self.chat_channel.1);
+                            msg.push_str(chunk.iter().collect::<String>().as_str());
+                            msg
+                        })
                         .rev()
                         .collect();
 
@@ -183,10 +203,20 @@ impl UiContext {
                 };
             },
             InsimEvent::NextChannel => {
-                todo!("Implement channel switching");
+                let current_index = CHAT_CHANNELS.iter().position(|&c| c == self.chat_channel).unwrap_or(0);
+                let next_index = (current_index + 1) % CHAT_CHANNELS.len();
+                self.chat_channel = CHAT_CHANNELS[next_index];
+                self.update_queue.push(UiEvent::UpdateChannel(self.chat_channel));
             },
             InsimEvent::PeviousChannel => {
-                todo!("Implement channel switching");
+                let current_index = CHAT_CHANNELS.iter().position(|&c| c == self.chat_channel).unwrap_or(0);
+                let previous_index = if current_index == 0 {
+                    CHAT_CHANNELS.len() - 1
+                } else {
+                    current_index - 1
+                };
+                self.chat_channel = CHAT_CHANNELS[previous_index];
+                self.update_queue.push(UiEvent::UpdateChannel(self.chat_channel));
             },
         }
     }
@@ -201,10 +231,10 @@ fn get_state_btn(state: UiState) -> insim::insim::Btn {
     };
 
     insim::insim::Btn{
-        t: PREVIEW_OFFEST_TOP,
+        t: UI_OFFSET_TOP,
         w: UI_SCALE,
         h: UI_SCALE,
-        l: STATE_OFFSET_LEFT,
+        l: UI_OFFSET_LEFT,
         reqi: insim::identifiers::RequestId::from(1),
         ucid: insim::identifiers::ConnectionId::LOCAL,
         clickid: insim::identifiers::ClickId::from(STATE_ID),
@@ -221,17 +251,17 @@ fn get_state_btn(state: UiState) -> insim::insim::Btn {
 
 // depending on charaters used, width may vary
 fn msg_to_btn_width(message: String) -> u8 {
-    let len = message.len();
-    let width = (len as f32 * 0.75).ceil() as u8 + UI_SCALE;
-    width.clamp(5, 200)
+    let len = insim::core::string::colours::strip(message.as_str()).len();
+    let width = (len as f32 * 0.75).ceil() as u8 + 3;
+    width.clamp(1, 200)
 }
 
 fn get_message_preview_btn(message: String) -> insim::insim::Btn {
     insim::insim::Btn{
-        t: PREVIEW_OFFEST_TOP,
+        t: UI_OFFSET_TOP,
         w: msg_to_btn_width(message.clone()),
         h: UI_SCALE,
-        l: PREVIEW_OFFSET_LEFT,
+        l: UI_OFFSET_LEFT + UI_SCALE, // next to state
         reqi: insim::identifiers::RequestId::from(1),
         ucid: insim::identifiers::ConnectionId::LOCAL,
         clickid: insim::identifiers::ClickId::from(PREVIEW_ID),
@@ -243,6 +273,24 @@ fn get_message_preview_btn(message: String) -> insim::insim::Btn {
         typein: None,
         caption: None,
         text: format!("^3{}", message),
+    }
+}
+
+fn get_channel_btn(channel: ChatChannel) -> insim::insim::Btn {
+    insim::insim::Btn{
+        t: UI_OFFSET_TOP + UI_SCALE,
+        l: UI_OFFSET_LEFT,
+        h: UI_SCALE,
+        w: msg_to_btn_width(channel.0.to_string()),
+        reqi: insim::identifiers::RequestId::from(1),
+        ucid: insim::identifiers::ConnectionId::LOCAL,
+        clickid: insim::identifiers::ClickId::from(CHANNEL_ID),
+        bstyle: insim::insim::BtnStyle{
+            colour: insim::insim::BtnStyleColour::NotEditable,
+            flags: insim::insim::BtnStyleFlags::LIGHT | insim::insim::BtnStyleFlags::LEFT,
+        },
+        text: channel.0.to_string(),
+        ..Default::default()
     }
 }
 
