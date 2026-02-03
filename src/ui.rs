@@ -85,7 +85,7 @@ impl UiContext {
                         clickid: insim::identifiers::ClickId::from(PREVIEW_ID),
                         clickmax: 0,
                         ucid: insim::identifiers::ConnectionId::LOCAL,
-                        inst: insim::insim::BtnInst::default(),
+                        ..Default::default()
                     };
                     let _ = insim.send(insim::Packet::Bfn(bfn)).await;
                 },
@@ -99,7 +99,7 @@ impl UiContext {
                         clickid: insim::identifiers::ClickId::from(0),
                         clickmax: 0,
                         ucid: insim::identifiers::ConnectionId::LOCAL,
-                        inst: insim::insim::BtnInst::default(),
+                        ..Default::default()
                     })).await;
                 },
                 UiEvent::UpdateChannel(channel) => {
@@ -231,6 +231,7 @@ fn get_state_btn(state: UiState) -> insim::insim::Btn {
     };
 
     insim::insim::Btn{
+        text: insim::core::string::escaping::escape(text).to_string(),
         t: UI_OFFSET_TOP,
         w: UI_SCALE,
         h: UI_SCALE,
@@ -238,18 +239,16 @@ fn get_state_btn(state: UiState) -> insim::insim::Btn {
         reqi: insim::identifiers::RequestId::from(1),
         ucid: insim::identifiers::ConnectionId::LOCAL,
         clickid: insim::identifiers::ClickId::from(STATE_ID),
-        inst: insim::insim::BtnInst::default(),
         bstyle: insim::insim::BtnStyle{
             colour: insim::insim::BtnStyleColour::NotEditable,
             flags: insim::insim::BtnStyleFlags::LIGHT,
         },
-        typein: None,
-        caption: None,
-        text: text.to_string(),
+        ..Default::default()
     }
 }
 
-// depending on charaters used, width may vary
+/// depending on charaters used, width may vary
+/// todo: this is not too accurate. Do we have to look at specific chars?
 fn msg_to_btn_width(message: String) -> u8 {
     let len = insim::core::string::colours::strip(message.as_str()).len();
     let width = (len as f32 * 0.75).ceil() as u8 + 3;
@@ -257,7 +256,9 @@ fn msg_to_btn_width(message: String) -> u8 {
 }
 
 fn get_message_preview_btn(message: String) -> insim::insim::Btn {
+    let text = insim::core::string::escaping::escape(format!("^3{}", message).as_str()).to_string();
     insim::insim::Btn{
+        text,
         t: UI_OFFSET_TOP,
         w: msg_to_btn_width(message.clone()),
         h: UI_SCALE,
@@ -265,19 +266,19 @@ fn get_message_preview_btn(message: String) -> insim::insim::Btn {
         reqi: insim::identifiers::RequestId::from(1),
         ucid: insim::identifiers::ConnectionId::LOCAL,
         clickid: insim::identifiers::ClickId::from(PREVIEW_ID),
-        inst: insim::insim::BtnInst::default(),
         bstyle: insim::insim::BtnStyle{
             colour: insim::insim::BtnStyleColour::NotEditable,
             flags: insim::insim::BtnStyleFlags::LIGHT | insim::insim::BtnStyleFlags::LEFT,
         },
-        typein: None,
-        caption: None,
-        text: format!("^3{}", message),
+        ..Default::default()
     }
 }
 
 fn get_channel_btn(channel: ChatChannel) -> insim::insim::Btn {
+    let text = insim::core::string::escaping::escape(channel.0).to_string();
+
     insim::insim::Btn{
+        text,
         t: UI_OFFSET_TOP + UI_SCALE,
         l: UI_OFFSET_LEFT,
         h: UI_SCALE,
@@ -289,7 +290,6 @@ fn get_channel_btn(channel: ChatChannel) -> insim::insim::Btn {
             colour: insim::insim::BtnStyleColour::NotEditable,
             flags: insim::insim::BtnStyleFlags::LIGHT | insim::insim::BtnStyleFlags::LEFT,
         },
-        text: channel.0.to_string(),
         ..Default::default()
     }
 }
