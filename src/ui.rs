@@ -2,6 +2,7 @@ use std::pin::Pin;
 
 use insim::builder::InsimTask;
 use tokio::time::Sleep;
+use tracing::{debug, error, info};
 
 use crate::{MAX_MESSAGE_LEN, MESSAGE_PREVIEW_TIMEOUT_SECS, audio::{audio_pipeline::{AudioPipeline}, speech_to_text::{SttMessage, SttMessageType}}, insim_io::InsimEvent};
 
@@ -70,7 +71,7 @@ impl UiContext {
 
     pub async fn dispatch_ui_events(&mut self, insim: InsimTask) {
         if !self.update_queue.is_empty() {
-            println!("Dispatching {} UI events", self.update_queue.len());
+            debug!("Dispatching {} UI events", self.update_queue.len());
         }
 
         while let Some(event) = self.update_queue.pop() {
@@ -111,12 +112,14 @@ impl UiContext {
 
     pub fn handle_stt_message(&mut self, msg: SttMessage) {
         match msg.msg_type {
-            SttMessageType::Log |
+            SttMessageType::Log => {
+                info!("{}", msg);
+            },
             SttMessageType::TranscriptionError => {
-                println!("{}", msg);
+                error!("{}", msg);
             },
             SttMessageType::TranscriptionResult => {
-                println!("{}", msg);
+                info!("{}", msg);
                 self.message = msg.content;
                 self.state = UiState::Idle;
                 self.update_queue.push(UiEvent::UpdateState(self.state));
@@ -134,7 +137,7 @@ impl UiContext {
                 if is_in_game {
                     match self.state {
                         UiState::Stopped => {
-                            println!("Detected in-game state, starting STT.");
+                            info!("Detected in-game state, starting STT.");
                             self.state = UiState::Idle;
                             if !self.message.is_empty() {
                                 self.update_queue.push(UiEvent::UpdatePreview(self.message.clone()));
@@ -148,7 +151,7 @@ impl UiContext {
                     match self.state {
                         UiState::Stopped => { /* No state change */ }
                         _ => {
-                            println!("Detected not in-game state, stopping STT.");
+                            info!("Detected not in-game state, stopping STT.");
                             self.state = UiState::Stopped;
                             self.update_queue.push(UiEvent::RemoveAllBtns);
                         }
@@ -160,13 +163,13 @@ impl UiContext {
                     UiState::Processing => {},
                     UiState::Stopped => {},
                     UiState::Idle => {
-                        println!("Started recording...");
+                        info!("Started recording...");
                         self.state = UiState::Recording;
                         self.update_queue.push(UiEvent::UpdateState(self.state));
                         audio_pipeline.start_recording().await;
                     },
                     UiState::Recording => {
-                        println!("Stopped recording...");
+                        info!("Stopped recording...");
                         self.state = UiState::Processing;
                         self.update_queue.push(UiEvent::UpdateState(self.state));
                         audio_pipeline.stop_recording_and_transcribe().await;

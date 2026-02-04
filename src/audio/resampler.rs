@@ -3,16 +3,19 @@ use rubato::{
     SincInterpolationParameters, SincInterpolationType, WindowFunction,
     Resampler,
 };
+use tracing::error;
 use whisper_rs::convert_stereo_to_mono_audio;
-use tokio::{sync::mpsc::{Receiver}, task::JoinHandle};
+use tokio::{sync::mpsc::{Sender, Receiver}, task::JoinHandle};
+
+use crate::audio::audio_pipeline::CaptureMsg;
 
 pub async fn init(
-    mut audio_rx: Receiver<Vec<f32>>,
+    mut audio_rx: Receiver<CaptureMsg>,
     sample_rate: usize,
     input_channels: usize,
-) -> Result<(Receiver<Vec<f32>>, JoinHandle<()>), Box<dyn std::error::Error>> {
-    let (resampled_tx, resampled_rx) = tokio::sync::mpsc::channel::<Vec<f32>>(10);
-
+) -> Result<(Sender<CaptureMsg>, Receiver<CaptureMsg>, JoinHandle<()>), Box<dyn std::error::Error>> {
+    let (resampled_tx, resampled_rx) = tokio::sync::mpsc::channel::<CaptureMsg>(10);
+    let resampled_tx_clone = resampled_tx.clone();
     let handle = tokio::spawn(async move {
         let mut input_accum: Vec<f32> = Vec::new();
 
@@ -37,38 +40,49 @@ pub async fn init(
         .expect("Failed to create async resampler");
 
         loop {
-            while let Some(samples) = audio_rx.recv().await {
-                let mono = match input_channels {
-                    1 => samples,
-                    2 => convert_stereo_to_mono_audio(&samples).expect("should be no half samples missing"),
-                    _ => panic!("Unsupported number of input channels: {}", input_channels),
-                };
+            let samples = match audio_rx.recv().await {
+                Some(msg) => match msg {
+                    CaptureMsg::Audio(samples) => { samples },
+                    CaptureMsg::Error(err) => {
+                        error!(err);
+                        break;
+                    },
+                    CaptureMsg::Stop => { continue; } // this should never happen.
+                },
+                None => break,
+            };
 
-                input_accum.extend_from_slice(&mono);
-                if input_accum.len() < 1024 {
-                    continue;
-                }
+            let mono = match input_channels {
+                1 => samples,
+                2 => convert_stereo_to_mono_audio(&samples).expect("should be no half samples missing"),
+                _ => panic!("Unsupported number of input channels: {}", input_channels),
+            };
 
-                let mono: Vec<f32> = input_accum.drain(..1024).collect();
-
-                // prep output adapters (same shape, but resized to max)
-                let mut out = vec![0.0; resampler.output_frames_max()];
-
-                // process into buffer
-                let (_, out_frames) = resampler
-                    .process_into_buffer(
-                        &audioadapter_buffers::direct::InterleavedSlice::new(&mono, 1, mono.len()).unwrap(),
-                        &mut audioadapter_buffers::direct::InterleavedSlice::new_mut(&mut out, 1, resampler.output_frames_max()).unwrap(),
-                        None,
-                    )
-                    .unwrap();
-
-                out.truncate(out_frames);
-                resampled_tx.send(out).await.unwrap();
+            input_accum.extend_from_slice(&mono);
+            if input_accum.len() < 1024 {
+                continue;
             }
+
+            let mono: Vec<f32> = input_accum.drain(..1024).collect();
+
+            // prep output adapters (same shape, but resized to max)
+            let mut out = vec![0.0; resampler.output_frames_max()];
+
+            // process into buffer
+            let (_, out_frames) = resampler
+
+                .process_into_buffer(
+                    &audioadapter_buffers::direct::InterleavedSlice::new(&mono, 1, mono.len()).unwrap(),
+                    &mut audioadapter_buffers::direct::InterleavedSlice::new_mut(&mut out, 1, resampler.output_frames_max()).unwrap(),
+                    None,
+                )
+                .unwrap();
+
+            out.truncate(out_frames);
+            resampled_tx_clone.send(CaptureMsg::Audio(out)).await.unwrap();
         }
     });
 
-    Ok((resampled_rx, handle))
+    Ok((resampled_tx, resampled_rx, handle))
 }
 

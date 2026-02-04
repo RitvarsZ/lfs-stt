@@ -1,5 +1,6 @@
 use insim::builder::InsimTask;
 use tokio::{sync::mpsc::Receiver, task::JoinHandle};
+use tracing::{error, info};
 
 use crate::{INSIM_HOST, INSIM_PORT};
 
@@ -25,7 +26,7 @@ impl InsimEvent {
 }
 
 pub async fn init_insim() -> Result<(InsimTask, Receiver<InsimEvent>, JoinHandle<insim::Result<()>>), Box<dyn std::error::Error>> {
-    println!("Connecting to INSIM at {}:{}", INSIM_HOST, INSIM_PORT);
+    info!("Connecting to INSIM at {}:{}", INSIM_HOST, INSIM_PORT);
     let (event_tx, event_rx) = tokio::sync::mpsc::channel(100);
     let (insim, handle) = match insim::tcp(format!("{}:{}", INSIM_HOST, INSIM_PORT))
         .isi_iname("lfs-stt".to_owned())
@@ -33,7 +34,7 @@ pub async fn init_insim() -> Result<(InsimTask, Receiver<InsimEvent>, JoinHandle
         .spawn(1).await {
         Ok(c) => c,
         Err(err) => {
-            println!("Failed to connect to INSIM: {}", err);
+            error!("Failed to connect to INSIM: {}", err);
             return Err(Box::new(err));
         },
     };

@@ -1,16 +1,20 @@
-use cpal::{SampleRate, traits::{DeviceTrait, HostTrait}};
+use std::sync::{Arc, atomic::AtomicBool};
+
+use cpal::{SampleRate, Stream, traits::{DeviceTrait, HostTrait, StreamTrait}};
 use tokio::{sync::mpsc::{self, Receiver}};
+use tracing::{error, info};
+
+use crate::audio::audio_pipeline::CaptureMsg;
 
 pub struct AudioInputConfig {
     pub input_channels: usize,
     pub sample_rate: SampleRate,
 }
 
-pub fn init() -> Result<
-    (cpal::Stream, AudioInputConfig, Receiver<Vec<f32>>),
-    Box<dyn std::error::Error>
-> {
-    let (audio_tx, audio_rx) = mpsc::channel::<Vec<f32>>(10);
+pub fn init(
+    is_recording: Arc<AtomicBool>,
+) -> Result<(Stream, AudioInputConfig, Receiver<CaptureMsg>), Box<dyn std::error::Error>> {
+    let (audio_tx, audio_rx) = mpsc::channel::<CaptureMsg>(10);
 
     let host = cpal::default_host();
     let device = host.default_input_device().expect("No input device");
@@ -24,19 +28,29 @@ pub fn init() -> Result<
     }
 
     let sample_rate = input_config.sample_rate();
+    let audio_tx_clone = audio_tx.clone();
     let stream = device.build_input_stream(
         &input_config.into(),
         move |data: &[f32], _| {
-            match audio_tx.blocking_send(data.to_vec()) {
-                Ok(_) => (),
-                Err(e) => eprintln!("Failed to send audio data: {}", e),
-            };
+            if is_recording.load(std::sync::atomic::Ordering::Relaxed) {
+                match audio_tx.try_send(CaptureMsg::Audio(data.to_vec())) {
+                    Ok(_) => (),
+                    Err(e) => error!("Failed to send audio data: {}", e),
+                };
+            }
         },
-        move |err| eprintln!("Audio error: {:?}", err),
+        move |err| {
+            let _ = audio_tx_clone.send(CaptureMsg::Error(format!("Audio stream error: {}", err)));
+        },
         None,
     )?;
 
-    println!("Using input device: {}", device.description()?);
+    match stream.play() {
+        Ok(()) => (),
+        Err(e) => error!("Failed to start audio stream: {}", e),
+    }
+
+    info!("Using input device: {}", device.description()?);
 
     let config = AudioInputConfig {
         input_channels,
