@@ -1,8 +1,8 @@
 ---
 
-# lfs-stt
+# LFS-STT - Live for Speed speech to text
 
-lfs-stt is a **Insim plugin** for **Live For Speed** that enables **speech-to-text chat** using **OpenAI’s Whisper model**.
+lfs-stt is a **InSim plugin** for **Live For Speed** that enables **speech-to-text chat** using **OpenAI’s Whisper model**.
 Players can record audio in-game, have it transcribed, and send messages directly into the server chat. Multiple **chat channels** can be configured with custom prefixes — especially useful on cruise servers or organized events.
 
 ---
@@ -42,10 +42,10 @@ All plugin settings are managed via a **TOML configuration file** (`config.toml`
 # InSim connection settings
 # ================================
 
-# Insim host
+# InSim host
 insim_host = "127.0.0.1"
 
-# Insim port
+# InSim port
 insim_port = "29999"
 
 # ================================
@@ -109,7 +109,7 @@ debug_log_level = "info"
 [[chat_channels]]
 # What you see in the UI
 display = "/say"
-# Message prefix sent to Insim
+# Message prefix sent to InSim
 prefix = ""
 
 [[chat_channels]]
