@@ -5,6 +5,7 @@
 lfs-stt is a **InSim plugin** for **Live For Speed** that enables **speech-to-text chat** using **OpenAI’s Whisper model**.
 Players can record audio in-game, have it transcribed, and send messages directly into the server chat. Multiple **chat channels** can be configured with custom prefixes — especially useful on cruise servers or organized events.
 
+![](img/demo.gif)
 ---
 
 ## Features
