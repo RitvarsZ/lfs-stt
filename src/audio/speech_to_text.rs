@@ -1,6 +1,6 @@
 use std::fmt::Display;
 use tokio::{sync::mpsc::{self, Receiver}, task::JoinHandle};
-use whisper_rs::{FullParams, WhisperContext, WhisperContextParameters};
+use whisper_rs::{FullParams, WhisperContext, WhisperContextParameters, install_logging_hooks};
 use crate::global::CONFIG;
 
 pub enum SttMessageType {
@@ -36,6 +36,7 @@ pub async fn init(
     let (event_tx, event_rx) = mpsc::channel::<SttMessage>(1);
 
     let handle = tokio::spawn(async move {
+        install_logging_hooks();
         let mut params = WhisperContextParameters::new();
         params.use_gpu(CONFIG.use_gpu);
         let whisper_ctx = WhisperContext::new_with_params(CONFIG.model_path.as_str(), params)
