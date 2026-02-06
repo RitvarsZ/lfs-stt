@@ -1,3 +1,5 @@
+use tokio::task::JoinError;
+
 mod recorder;
 mod resampler;
 pub mod speech_to_text;
@@ -14,8 +16,14 @@ pub enum AudioPipelineError {
     #[error("speech-to-text error")]
     SpeechToText(#[from] whisper_rs::WhisperError),
 
+    #[error("model file not found, check you config")]
+    ModelNotFound,
+
     #[error("audio debug error")]
     AudioDebugError(String),
+
+    #[error("audio pipeline task error")]
+    AudioPipelineTaskJoinError(JoinError)
 }
 
 #[derive(Debug, thiserror::Error)]

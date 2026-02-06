@@ -2,7 +2,7 @@ use std::fmt::Display;
 use tokio::{sync::mpsc::{self, Receiver}, task::JoinHandle};
 use tracing::info;
 use whisper_rs::{FullParams, WhisperContext, WhisperContextParameters, install_logging_hooks};
-use crate::{audio::AudioPipelineError, global::CONFIG};
+use crate::{audio::{AudioPipelineError}, global::CONFIG};
 
 pub enum SttMessageType {
     TranscriptionError,
@@ -38,10 +38,14 @@ pub async fn init(
         install_logging_hooks();
         let mut params = WhisperContextParameters::new();
         params.use_gpu(CONFIG.use_gpu);
+        // check if model path exists:
+        if !std::path::Path::new(&CONFIG.model_path).exists() {
+            return Err(AudioPipelineError::ModelNotFound);
+        }
         let whisper_ctx = WhisperContext::new_with_params(CONFIG.model_path.as_str(), params)?;
         let mut whisper_state = match whisper_ctx.create_state() {
             Ok(state) => state,
-            Err(err) => {return Err(AudioPipelineError::SpeechToText(err));}
+            Err(err) => {return Err(err.into());}
         };
         let mut full_params = FullParams::new(whisper_rs::SamplingStrategy::Greedy { best_of: 8 });
         full_params.set_language(Some("en"));

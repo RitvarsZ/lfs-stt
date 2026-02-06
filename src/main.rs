@@ -1,6 +1,6 @@
 use anyhow::Context;
 use futures::FutureExt;
-use tracing::{warn, info, error, level_filters::LevelFilter};
+use tracing::{info, level_filters::LevelFilter};
 use tracing_subscriber::FmtSubscriber;
 
 use crate::{global::CONFIG, ui::UiContext};
@@ -54,13 +54,17 @@ async fn main() -> anyhow::Result<()> {
             res = &mut insim_handle => {
                 match res {
                     Ok(Ok(())) => info!("Insim task ended successfully."),
-                    Ok(Err(e)) => warn!("{}", e),
-                    Err(e) => error!("{}", e),
+                    Ok(Err(e)) => { return Err(e).context("Insim task ended with an error") },
+                    Err(e) => { return Err(e).context("Insim task panicked")},
                 }
                 break;
             },
-            _ = &mut audio_pipeline_handle => {
-                info!("Audio pipeline task has ended.");
+            res = &mut audio_pipeline_handle => {
+                match res {
+                    Ok(Ok(())) => info!("Audio pipeline task ended successfully."),
+                    Ok(Err(e)) => { return Err(e).context("Audio pipeline task ended with an error") },
+                    Err(e) => { return Err(e).context("Audio pipeline task panicked")},
+                }
                 break;
             },
         }

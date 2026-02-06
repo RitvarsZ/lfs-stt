@@ -17,7 +17,7 @@ pub struct AudioPipeline {
 }
 
 impl AudioPipeline {
-    pub async fn new() -> Result<(Self, Receiver<SttMessage>, JoinHandle<()>), AudioPipelineError> {
+    pub async fn new() -> Result<(Self, Receiver<SttMessage>, JoinHandle<Result<(), AudioPipelineError>>), AudioPipelineError> {
         let is_recording = Arc::new(AtomicBool::new(false));
         let (stt_tx, audio_buffer_rx) = mpsc::channel::<Vec<f32>>(1);
 
@@ -107,19 +107,17 @@ async fn init_audio_capture(
     Ok(handle)
 }
 
-async fn watch_audio_handles(handles: Vec<JoinHandle<Result<(), AudioPipelineError>>>) -> JoinHandle<()> {
+async fn watch_audio_handles(handles: Vec<JoinHandle<Result<(), AudioPipelineError>>>) -> JoinHandle<Result<(), AudioPipelineError>> {
     tokio::spawn(async move {
         let (completed, _index, remaining) = futures::future::select_all(handles).await;
-
-        if let Err(e) = completed {
-            error!("One of the audio pipeline tasks panicked: {:?}", e);
-        } else {
-            info!("One of the audio pipeline tasks finished");
-        }
-
         info!("Aborting remaining audio pipeline tasks...");
         for handle in remaining {
             handle.abort();
+        }
+        match completed {
+            Ok(Ok(())) => Ok(()),
+            Ok(Err(e)) => Err(e),
+            Err(e) => Err(AudioPipelineError::AudioPipelineTaskJoinError(e)),
         }
     })
 }
