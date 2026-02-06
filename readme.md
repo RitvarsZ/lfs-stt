@@ -15,7 +15,7 @@ Players can record audio in-game, have it transcribed, and send messages directl
 * Message preview before sending
 * Cycle through multiple chat channels (message prefixes)
 * Configurable UI position, scale, and timing settings
-* Optional GPU acceleration for faster transcription
+* Optional GPU acceleration for faster transcription (highly recommended as running on CPU is very slow)
 
 ---
 
