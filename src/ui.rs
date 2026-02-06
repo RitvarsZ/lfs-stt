@@ -102,9 +102,6 @@ impl UiContext {
 
     pub fn handle_stt_message(&mut self, msg: SttMessage) {
         match msg.msg_type {
-            SttMessageType::Log => {
-                info!("{}", msg);
-            },
             SttMessageType::TranscriptionError => {
                 error!("{}", msg);
             },

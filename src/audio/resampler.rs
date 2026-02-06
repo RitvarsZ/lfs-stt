@@ -3,17 +3,16 @@ use rubato::{
     SincInterpolationParameters, SincInterpolationType, WindowFunction,
     Resampler,
 };
-use tracing::error;
 use whisper_rs::convert_stereo_to_mono_audio;
 use tokio::{sync::mpsc::{Sender, Receiver}, task::JoinHandle};
 
-use crate::audio::audio_pipeline::CaptureMsg;
+use crate::audio::{AudioPipelineError, audio_pipeline::CaptureMsg};
 
 pub async fn init(
     mut audio_rx: Receiver<CaptureMsg>,
     sample_rate: usize,
     input_channels: usize,
-) -> Result<(Sender<CaptureMsg>, Receiver<CaptureMsg>, JoinHandle<()>), Box<dyn std::error::Error>> {
+) -> Result<(Sender<CaptureMsg>, Receiver<CaptureMsg>, JoinHandle<Result<(), AudioPipelineError>>), AudioPipelineError> {
     let (resampled_tx, resampled_rx) = tokio::sync::mpsc::channel::<CaptureMsg>(10);
     let resampled_tx_clone = resampled_tx.clone();
     let handle = tokio::spawn(async move {
@@ -29,27 +28,26 @@ pub async fn init(
 
         let ratio = 16_000.0 / sample_rate as f64;
         let chunk_size = 1024;
-        let mut resampler = Async::<f32>::new_sinc(
+        let mut resampler = match Async::<f32>::new_sinc(
             ratio,
             1.0, // no dynamic ratio range
             &sinc_params,
             chunk_size,
             1, // nbr_channels
             FixedAsync::Input,
-        )
-        .expect("Failed to create async resampler");
+        ) {
+            Ok(r) => r,
+            Err(e) => { return Err(AudioPipelineError::Resampler(e.into())); }
+        };
 
         loop {
             let samples = match audio_rx.recv().await {
                 Some(msg) => match msg {
                     CaptureMsg::Audio(samples) => { samples },
-                    CaptureMsg::Error(err) => {
-                        error!(err);
-                        break;
-                    },
-                    CaptureMsg::Stop => { continue; } // this should never happen.
+                    CaptureMsg::Stop => { continue; },
+                    CaptureMsg::Exit => { return Ok(()) }, // exit signal, stop resampling task
                 },
-                None => break,
+                None => { return Ok(()); },
             };
 
             let mono = match input_channels {
@@ -69,17 +67,18 @@ pub async fn init(
             let mut out = vec![0.0; resampler.output_frames_max()];
 
             // process into buffer
-            let (_, out_frames) = resampler
-
+            let (_, out_frames) = match resampler
                 .process_into_buffer(
                     &audioadapter_buffers::direct::InterleavedSlice::new(&mono, 1, mono.len()).unwrap(),
                     &mut audioadapter_buffers::direct::InterleavedSlice::new_mut(&mut out, 1, resampler.output_frames_max()).unwrap(),
                     None,
-                )
-                .unwrap();
+                ) {
+                    Ok(r) => r,
+                    Err(e) => { return Err(AudioPipelineError::Resampler(e.into())); }
+                };
 
             out.truncate(out_frames);
-            resampled_tx_clone.send(CaptureMsg::Audio(out)).await.unwrap();
+            let _ = resampled_tx_clone.send(CaptureMsg::Audio(out)).await;
         }
     });
 

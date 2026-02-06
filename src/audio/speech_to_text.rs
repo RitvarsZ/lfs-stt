@@ -1,10 +1,10 @@
 use std::fmt::Display;
 use tokio::{sync::mpsc::{self, Receiver}, task::JoinHandle};
+use tracing::info;
 use whisper_rs::{FullParams, WhisperContext, WhisperContextParameters, install_logging_hooks};
-use crate::global::CONFIG;
+use crate::{audio::AudioPipelineError, global::CONFIG};
 
 pub enum SttMessageType {
-    Log,
     TranscriptionError,
     TranscriptionResult,
 }
@@ -17,7 +17,6 @@ pub struct SttMessage {
 impl Display for SttMessage {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self.msg_type {
-            SttMessageType::Log => write!(f, "[STT LOG] {}", self.content),
             SttMessageType::TranscriptionError => write!(f, "[STT ERROR] {}", self.content),
             SttMessageType::TranscriptionResult => write!(f, "[STT TRANSCRIPTION] {}", self.content),
         }
@@ -32,16 +31,18 @@ impl SttMessage {
 
 pub async fn init(
     mut audio_in: Receiver<Vec<f32>>
-) -> Result<(Receiver<SttMessage>, JoinHandle<()>), Box<dyn std::error::Error>> {
+) -> Result<(Receiver<SttMessage>, JoinHandle<Result<(), AudioPipelineError>>), AudioPipelineError> {
     let (event_tx, event_rx) = mpsc::channel::<SttMessage>(1);
 
     let handle = tokio::spawn(async move {
         install_logging_hooks();
         let mut params = WhisperContextParameters::new();
         params.use_gpu(CONFIG.use_gpu);
-        let whisper_ctx = WhisperContext::new_with_params(CONFIG.model_path.as_str(), params)
-                .expect("Failed to create Whisper context");
-        let mut whisper_state = whisper_ctx.create_state().unwrap();
+        let whisper_ctx = WhisperContext::new_with_params(CONFIG.model_path.as_str(), params)?;
+        let mut whisper_state = match whisper_ctx.create_state() {
+            Ok(state) => state,
+            Err(err) => {return Err(AudioPipelineError::SpeechToText(err));}
+        };
         let mut full_params = FullParams::new(whisper_rs::SamplingStrategy::Greedy { best_of: 8 });
         full_params.set_language(Some("en"));
         full_params.set_print_special(false);
@@ -49,30 +50,21 @@ pub async fn init(
         full_params.set_print_realtime(false);
         full_params.set_print_timestamps(false);
 
-        event_tx.send(
-            SttMessage::new(
-                SttMessageType::Log,
-                "✅ STT thread started".into()
-            )
-        ).await.unwrap();
-
+        info!("✅ STT thread started");
 
         loop {
             while let Some(audio_buffer) = audio_in.recv().await {
-                event_tx.send(
-                    SttMessage::new(
-                        SttMessageType::Log,
-                        format!("Got samples to transcribe: {} samples", audio_buffer.len())
-                    )
-                ).await.unwrap();
-                let _ = maybe_dump_buffer_to_wav(&audio_buffer);
+                match maybe_dump_buffer_to_wav(&audio_buffer) {
+                    Ok(_) => (),
+                    Err(err) => { return Err(err); }
+                };
                 if let Err(err) = whisper_state.full(full_params.clone(), &audio_buffer) {
-                    event_tx.send(
+                    let _ = event_tx.send(
                         SttMessage::new(
                             SttMessageType::TranscriptionError,
                             format!("❌ Transcription error: {:?}", err)
                         )
-                    ).await.unwrap();
+                    ).await;
                     continue;
                 }
 
@@ -84,12 +76,12 @@ pub async fn init(
                     }
                 }
 
-                event_tx.send(
+                let _ = event_tx.send(
                     SttMessage::new(
                         SttMessageType::TranscriptionResult,
                         text.trim().to_string()
                     )
-                ).await.unwrap();
+                ).await;
             }
         }
     });
@@ -97,7 +89,7 @@ pub async fn init(
     Ok((event_rx, handle))
 }
 
-fn maybe_dump_buffer_to_wav(samples: &[f32]) -> Result<(), Box<dyn std::error::Error>> {
+fn maybe_dump_buffer_to_wav(samples: &[f32]) -> Result<(), AudioPipelineError> {
     if !CONFIG.debug_audio_resampling { return Ok(()); }
 
     let spec = hound::WavSpec {
@@ -106,10 +98,14 @@ fn maybe_dump_buffer_to_wav(samples: &[f32]) -> Result<(), Box<dyn std::error::E
         bits_per_sample: 32,
         sample_format: hound::SampleFormat::Float,
     };
-    let mut writer = hound::WavWriter::create("debug.wav", spec)?;
+    let mut writer = hound::WavWriter::create("debug.wav", spec)
+        .map_err(|e| AudioPipelineError::AudioDebugError(format!("Failed to create WAV writer: {}", e)))?;
     for &sample in samples {
-        writer.write_sample(sample)?;
+        writer.write_sample(sample)
+            .map_err(|e| AudioPipelineError::AudioDebugError(format!("Failed to write debug audio into file: {}", e)))?;
     }
-    writer.finalize()?;
+    writer.finalize()
+        .map_err(|e| AudioPipelineError::AudioDebugError(format!("Failed to finalize WAV file: {}", e)))?;
+
     Ok(())
 }

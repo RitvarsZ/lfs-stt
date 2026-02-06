@@ -34,6 +34,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "anyhow"
+version = "1.0.101"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5f0e0fee31ef5ed1ba1316088939cea399010ed7731dba877ed44aeb407a75ea"
+
+[[package]]
 name = "audio-core"
 version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -680,6 +686,7 @@ checksum = "bbd2bcb4c963f2ddae06a2efc7e9f3591312473c50c6685e1f298068316e66fe"
 name = "lfs_stt"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
  "audioadapter-buffers",
  "cpal",
  "crossterm",
@@ -689,6 +696,7 @@ dependencies = [
  "once_cell",
  "rubato",
  "serde",
+ "thiserror 2.0.18",
  "tokio",
  "toml",
  "tracing",

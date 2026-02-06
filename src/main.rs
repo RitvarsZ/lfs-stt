@@ -1,3 +1,4 @@
+use anyhow::Context;
 use futures::FutureExt;
 use tracing::{warn, info, error, level_filters::LevelFilter};
 use tracing_subscriber::FmtSubscriber;
@@ -11,17 +12,22 @@ mod config;
 mod global;
 
 #[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
+async fn main() -> anyhow::Result<()> {
     let subscriber = FmtSubscriber::builder()
         .with_max_level(LevelFilter::from(CONFIG.debug_log_level))
         .finish();
     tracing::subscriber::set_global_default(subscriber)
         .expect("setting default subscriber failed");
 
-    let (insim, mut insim_rx, insim_handle) = insim_io::init_insim().await?;
-    let (mut audio_pipeline, mut stt_rx, audio_pipeline_handle) = audio::audio_pipeline::AudioPipeline::new().await?;
+    let (insim, mut insim_rx, insim_handle) =
+        insim_io::init_insim()
+            .await
+            .context("Failed to initialize insim io")?;
+    let (mut audio_pipeline, mut stt_rx, audio_pipeline_handle) =
+        audio::audio_pipeline::AudioPipeline::new()
+            .await
+            .context("Failed to initialize audio pipeline")?;
 
-    // UI context
     let mut ui_context = UiContext::default();
 
     let mut audio_pipeline_handle = audio_pipeline_handle.fuse();

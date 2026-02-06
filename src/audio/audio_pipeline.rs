@@ -1,13 +1,13 @@
 use std::sync::{Arc, atomic::{AtomicBool, Ordering}};
-use cpal::Stream;
+use cpal::{Stream};
 use tokio::{sync::{mpsc::{self, Receiver}}, task::JoinHandle};
 use tracing::{debug, error, info};
-use crate::{audio::{self, speech_to_text::SttMessage}, global::CONFIG};
+use crate::{audio::{self, AudioPipelineError, speech_to_text::SttMessage}, global::CONFIG};
 
 pub enum CaptureMsg {
     Audio(Vec<f32>),
     Stop,
-    Error(String),
+    Exit,
 }
 
 pub struct AudioPipeline {
@@ -17,7 +17,7 @@ pub struct AudioPipeline {
 }
 
 impl AudioPipeline {
-    pub async fn new() -> Result<(Self, Receiver<SttMessage>, JoinHandle<()>), Box<dyn std::error::Error>> {
+    pub async fn new() -> Result<(Self, Receiver<SttMessage>, JoinHandle<()>), AudioPipelineError> {
         let is_recording = Arc::new(AtomicBool::new(false));
         let (stt_tx, audio_buffer_rx) = mpsc::channel::<Vec<f32>>(1);
 
@@ -66,7 +66,7 @@ async fn init_audio_capture(
     mut rx: mpsc::Receiver<CaptureMsg>,
     tx: mpsc::Sender<Vec<f32>>,
     is_recording: Arc<AtomicBool>,
-) -> Result<JoinHandle<()>, Box<dyn std::error::Error>> {
+) -> Result<JoinHandle<Result<(), AudioPipelineError>>, AudioPipelineError> {
     let handle = tokio::spawn(async move {
         let mut buffer = Vec::<f32>::with_capacity(16_000 * CONFIG.recording_timeout_secs as usize);
 
@@ -74,8 +74,8 @@ async fn init_audio_capture(
         loop {
             if let Some(data) = rx.recv().await {
                 match data {
-                    CaptureMsg::Error(err) => {
-                        error!(err);
+                    CaptureMsg::Exit => {
+                        error!("Audio capture task received error signal, exiting...");
                         break;
                     },
                     CaptureMsg::Stop => {
@@ -100,12 +100,14 @@ async fn init_audio_capture(
                 }
             }
         }
+
+        Ok(())
     });
 
     Ok(handle)
 }
 
-async fn watch_audio_handles(handles: Vec<JoinHandle<()>>) -> JoinHandle<()> {
+async fn watch_audio_handles(handles: Vec<JoinHandle<Result<(), AudioPipelineError>>>) -> JoinHandle<()> {
     tokio::spawn(async move {
         let (completed, _index, remaining) = futures::future::select_all(handles).await;
 
