@@ -1,6 +1,6 @@
 use insim::builder::InsimTask;
 use tokio::{sync::mpsc::Receiver, task::JoinHandle};
-use tracing::{error, info};
+use tracing::{info};
 
 use crate::global::CONFIG;
 
@@ -25,19 +25,23 @@ impl InsimEvent {
     }
 }
 
-pub async fn init_insim() -> Result<(InsimTask, Receiver<InsimEvent>, JoinHandle<insim::Result<()>>), Box<dyn std::error::Error>> {
+pub async fn init_insim() -> Result<(InsimTask, Receiver<InsimEvent>, JoinHandle<insim::Result<()>>), insim::Error> {
     info!("Connecting to INSIM at {}:{}", CONFIG.insim_host, CONFIG.insim_port);
     let (event_tx, event_rx) = tokio::sync::mpsc::channel(100);
-    let (insim, handle) = match insim::tcp(format!("{}:{}", CONFIG.insim_host, CONFIG.insim_port))
-        .isi_iname("lfs-stt".to_owned())
-        .isi_flag_local(true)
-        .spawn(1).await {
-        Ok(c) => c,
-        Err(err) => {
-            error!("Failed to connect to INSIM: {}", err);
-            return Err(Box::new(err));
-        },
+    let (insim, handle) = loop {
+        match insim::tcp(format!("{}:{}", CONFIG.insim_host, CONFIG.insim_port))
+            .isi_iname("lfs-stt".to_owned())
+            .isi_flag_local(true)
+            .spawn(1)
+            .await
+        {
+            Ok(v) => break v,
+            Err(_) => {
+                tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+            }
+        }
     };
+    info!("Connected to INSIM.");
 
     let mut rx = insim.subscribe();
     tokio::spawn(async move {

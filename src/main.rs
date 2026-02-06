@@ -1,5 +1,5 @@
 use futures::FutureExt;
-use tracing::{info, level_filters::LevelFilter};
+use tracing::{warn, info, error, level_filters::LevelFilter};
 use tracing_subscriber::FmtSubscriber;
 
 use crate::{global::CONFIG, ui::UiContext};
@@ -18,8 +18,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     tracing::subscriber::set_global_default(subscriber)
         .expect("setting default subscriber failed");
 
-    let (mut audio_pipeline, mut stt_rx, audio_pipeline_handle) = audio::audio_pipeline::AudioPipeline::new().await?;
     let (insim, mut insim_rx, insim_handle) = insim_io::init_insim().await?;
+    let (mut audio_pipeline, mut stt_rx, audio_pipeline_handle) = audio::audio_pipeline::AudioPipeline::new().await?;
 
     // UI context
     let mut ui_context = UiContext::default();
@@ -45,12 +45,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 ui_context.handle_insim_event(event, insim.clone(), &mut audio_pipeline).await;
             },
 
-            _ = &mut insim_handle => {
-                info!("Insim task has ended. Shutting down...");
+            res = &mut insim_handle => {
+                match res {
+                    Ok(Ok(())) => info!("Insim task ended successfully."),
+                    Ok(Err(e)) => warn!("{}", e),
+                    Err(e) => error!("{}", e),
+                }
                 break;
             },
             _ = &mut audio_pipeline_handle => {
-                info!("Audio pipeline task has ended. Shutting down...");
+                info!("Audio pipeline task has ended.");
                 break;
             },
         }
