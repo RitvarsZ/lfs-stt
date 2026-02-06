@@ -31,7 +31,8 @@ insim_port = "29999"
 # ================================
 
 # Path to the wihsper model directory or file
-# Download a model from https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small.en.bin
+# By default the plugin ships with a small English-only model, which is sufficient for most use cases.
+# Download other models from https://huggingface.co/ggerganov/whisper.cpp
 model_path = "models/small.en.bin"
 
 # Whether to use GPU acceleration to run the speech to text model
