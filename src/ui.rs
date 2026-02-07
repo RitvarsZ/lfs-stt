@@ -6,9 +6,9 @@ use tracing::{debug, error, info};
 use crate::{audio::{audio_pipeline::AudioPipeline, speech_to_text::{SttMessage, SttMessageType}}, config::ChatChannel, global::CONFIG, insim_io::InsimEvent};
 
 const MAX_MESSAGE_LEN: usize = 95;
-const STATE_ID: u8 = 1;
-const PREVIEW_ID: u8 = 2;
-const CHANNEL_ID: u8 = 3;
+const STATE_ID: u8 = 0;
+const PREVIEW_ID: u8 = 1;
+const CHANNEL_ID: u8 = 2;
 
 #[derive(Debug, Clone, Copy)]
 pub enum UiState {
@@ -73,7 +73,7 @@ impl UiContext {
                     let bfn = insim::insim::Bfn {
                         subt: insim::insim::BfnType::DelBtn,
                         reqi: insim::identifiers::RequestId::from(1),
-                        clickid: insim::identifiers::ClickId::from(PREVIEW_ID),
+                        clickid: insim::identifiers::ClickId::from(CONFIG.btn_id_offset + PREVIEW_ID),
                         clickmax: 0,
                         ucid: insim::identifiers::ConnectionId::LOCAL,
                         ..Default::default()
@@ -87,8 +87,8 @@ impl UiContext {
                     let _ = insim.send(insim::Packet::Bfn(insim::insim::Bfn{
                         subt: insim::insim::BfnType::Clear,
                         reqi: insim::identifiers::RequestId::from(1),
-                        clickid: insim::identifiers::ClickId::from(0),
-                        clickmax: 0,
+                        clickid: insim::identifiers::ClickId::from(CONFIG.btn_id_offset),
+                        clickmax: CONFIG.btn_id_offset + 3,
                         ucid: insim::identifiers::ConnectionId::LOCAL,
                         ..Default::default()
                     })).await;
@@ -228,7 +228,7 @@ fn get_state_btn(state: UiState) -> insim::insim::Btn {
         l: CONFIG.ui_offset_left,
         reqi: insim::identifiers::RequestId::from(1),
         ucid: insim::identifiers::ConnectionId::LOCAL,
-        clickid: insim::identifiers::ClickId::from(STATE_ID),
+        clickid: insim::identifiers::ClickId::from(CONFIG.btn_id_offset + STATE_ID),
         bstyle: insim::insim::BtnStyle{
             colour: insim::insim::BtnStyleColour::NotEditable,
             flags: insim::insim::BtnStyleFlags::LIGHT,
@@ -255,7 +255,7 @@ fn get_message_preview_btn(message: String) -> insim::insim::Btn {
         l: CONFIG.ui_offset_left + CONFIG.ui_scale, // next to state
         reqi: insim::identifiers::RequestId::from(1),
         ucid: insim::identifiers::ConnectionId::LOCAL,
-        clickid: insim::identifiers::ClickId::from(PREVIEW_ID),
+        clickid: insim::identifiers::ClickId::from(CONFIG.btn_id_offset + PREVIEW_ID),
         bstyle: insim::insim::BtnStyle{
             colour: insim::insim::BtnStyleColour::NotEditable,
             flags: insim::insim::BtnStyleFlags::LIGHT | insim::insim::BtnStyleFlags::LEFT,
@@ -275,7 +275,7 @@ fn get_channel_btn(channel: ChatChannel) -> insim::insim::Btn {
         w: msg_to_btn_width(channel.display.to_string()),
         reqi: insim::identifiers::RequestId::from(1),
         ucid: insim::identifiers::ConnectionId::LOCAL,
-        clickid: insim::identifiers::ClickId::from(CHANNEL_ID),
+        clickid: insim::identifiers::ClickId::from(CONFIG.btn_id_offset + CHANNEL_ID),
         bstyle: insim::insim::BtnStyle{
             colour: insim::insim::BtnStyleColour::NotEditable,
             flags: insim::insim::BtnStyleFlags::LIGHT | insim::insim::BtnStyleFlags::LEFT,
